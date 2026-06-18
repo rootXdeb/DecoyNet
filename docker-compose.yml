@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  DecoyNetai:
+    build: .
+    container_name: DecoyNetai
+    restart: unless-stopped
+    ports:
+      - "2222:22"       # SSH DecoyNet
+      - "80:80"         # HTTP DecoyNet
+      - "21:21"         # FTP DecoyNet
+      - "23:23"         # Telnet DecoyNet
+      - "3306:3306"     # MySQL DecoyNet
+      - "6379:6379"     # Redis DecoyNet
+      - "25:25"         # SMTP DecoyNet
+      - "3389:3389"     # RDP DecoyNet
+      - "445:445"       # SMB DecoyNet
+      - "27017:27017"   # MongoDB DecoyNet
+      - "9200:9200"     # Elasticsearch DecoyNet
+      - "5900:5900"     # VNC DecoyNet
+      - "5000:5000"     # Dashboard
+    volumes:
+      - ./logs:/app/logs
+      - ./database:/app/database
+      - ./malware/quarantine:/app/malware/quarantine
+      - ./ml_engine/models:/app/ml_engine/models
+    environment:
+      - LOG_LEVEL=INFO

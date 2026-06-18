@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>DecoyNetAI — API Docs</title>
+<link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+<nav class="navbar">
+  <span class="logo">🛡 DecoyNetAI</span>
+  <a href="/">Dashboard</a>
+  <a href="/attacks">Attacks</a>
+  <a href="/clusters">Clusters</a>
+  <a href="/reports">Reports</a>
+  <a href="/api/docs" class="active">API</a>
+</nav>
+
+<main class="container">
+  <h2>REST API Documentation</h2>
+  <p class="subtitle">All endpoints return JSON. Base URL: <code>http://&lt;host&gt;:5000</code></p>
+
+  <section class="table-box">
+    <h3>Session Endpoints</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Params</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/stats</code></td><td>Platform summary stats</td><td>—</td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/sessions</code></td><td>Recent attack sessions</td><td><code>?limit=50</code></td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/top_ips</code></td><td>Top attacker IPs by hit count</td><td>—</td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/attacker_types</code></td><td>Bot/human/advanced breakdown</td><td>—</td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/threat_timeline</code></td><td>Threat score over time</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="table-box">
+    <h3>Intelligence Endpoints</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Params</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/iocs</code></td><td>All collected IOCs (IPs, hashes, URLs)</td><td>—</td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/auth_attempts</code></td><td>Credential harvest log</td><td>—</td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/malware</code></td><td>Captured malware records</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="table-box">
+    <h3>Report Endpoints</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Params</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/reports</code></td><td>List available reports</td><td>—</td></tr>
+        <tr><td><span class="badge badge-warn">POST</span></td><td><code>/api/generate_report</code></td><td>Generate report now</td><td>—</td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/api/ml_evaluation</code></td><td>ML model evaluation metrics</td><td>—</td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/reports/view/&lt;filename&gt;</code></td><td>View HTML report</td><td>—</td></tr>
+        <tr><td><span class="badge badge-green">GET</span></td><td><code>/reports/download/&lt;filename&gt;</code></td><td>Download JSON report</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="table-box">
+    <h3>Example Response — /api/sessions</h3>
+    <pre style="background:#0f1117;padding:16px;border-radius:8px;overflow-x:auto;font-size:12px;color:#e2e8f0">[
+  {
+    "session_id":     "a1b2c3d4-...",
+    "ip":             "1.2.3.4",
+    "port":           2222,
+    "protocol":       "SSH",
+    "start_time":     1715000000.0,
+    "duration":       45.3,
+    "command_count":  12,
+    "threat_score":   78,
+    "threat_level":   "HIGH",
+    "attacker_type":  "human",
+    "final_strategy": "ENGAGE",
+    "attack_chain":   "Reconnaissance → C2 / Download → Execution",
+    "username":       "root",
+    "password":       "toor"
+  }
+]</pre>
+  </section>
+
+  <section class="table-box">
+    <h3>SIEM Integration</h3>
+    <p style="color:#94a3b8;font-size:13px;margin-bottom:16px">
+      The DecoyNet writes to these files automatically. Point your SIEM at them.
+    </p>
+    <table>
+      <thead><tr><th>File</th><th>Format</th><th>SIEM Compatibility</th></tr></thead>
+      <tbody>
+        <tr><td><code>logs/events.json</code></td><td>NDJSON (one event per line)</td><td>Elastic (Filebeat), Logstash, Graylog</td></tr>
+        <tr><td><code>logs/events.cef</code></td><td>Common Event Format</td><td>Splunk, IBM QRadar, HP ArcSight</td></tr>
+        <tr><td>UDP/TCP port 514</td><td>Syslog RFC3164</td><td>Any SIEM — set SIEM_SYSLOG_HOST in config.py</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>

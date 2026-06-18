@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>DecoyNetAI — Attack Map</title>
+<link rel="stylesheet" href="/static/style.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  #map { height: 520px; border-radius: 8px; border: 1px solid #2a2d3a; }
+  .legend { background:#1a1d27; border:1px solid #2a2d3a; border-radius:6px; padding:12px; }
+  .legend-item { display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:6px; }
+  .dot { width:12px; height:12px; border-radius:50%; display:inline-block; }
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <span class="logo">🛡 DecoyNetAI</span>
+  <a href="/">Dashboard</a>
+  <a href="/attacks">Attacks</a>
+  <a href="/clusters">Clusters</a>
+  <a href="/map" class="active">Attack Map</a>
+  <a href="/reports">Reports</a>
+  <a href="/api/docs">API</a>
+</nav>
+
+<main class="container">
+  <h2>🌍 Live Attack Map</h2>
+  <p class="subtitle">Real-time geolocation of attacker IPs — updated every 15 seconds.</p>
+
+  <section class="stat-grid">
+    <div class="stat-card"><p class="stat-label">Countries</p><p class="stat-value" id="stat-countries">0</p></div>
+    <div class="stat-card danger"><p class="stat-label">Active Attackers</p><p class="stat-value" id="stat-active">0</p></div>
+    <div class="stat-card info"><p class="stat-label">Total Hits</p><p class="stat-value" id="stat-hits">0</p></div>
+    <div class="stat-card warn"><p class="stat-label">Top Country</p><p class="stat-value" id="stat-top-country" style="font-size:18px">—</p></div>
+  </section>
+
+  <section class="chart-box" style="padding:0;overflow:hidden">
+    <div id="map"></div>
+  </section>
+
+  <section class="table-box">
+    <h3>Attacker Locations</h3>
+    <table>
+      <thead><tr><th>IP</th><th>Country</th><th>City</th><th>ISP</th><th>Protocol</th><th>Score</th></tr></thead>
+      <tbody id="geo-table">
+        <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:20px">Loading...</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+// Init dark map
+const map = L.map('map', { center: [20, 0], zoom: 2, zoomControl: true });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO',
+  maxZoom: 18,
+}).addTo(map);
+
+const markers = {};
+
+function getColor(level) {
+  return { CRITICAL:'#ef4444', HIGH:'#f97316', MEDIUM:'#f59e0b', LOW:'#10b981' }[level] || '#6b7280';
+}
+
+function makeIcon(level) {
+  const color = getColor(level);
+  return L.divIcon({
+    html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};
+                       border:2px solid rgba(255,255,255,0.4);box-shadow:0 0 8px ${color}"></div>`,
+    iconSize: [12, 12], className: ''
+  });
+}
+
+async function loadMap() {
+  try {
+    const res  = await fetch('/api/geo_attacks');
+    const data = await res.json();
+
+    // Update stats
+    const countries = new Set(data.map(d => d.country).filter(Boolean));
+    document.getElementById('stat-countries').textContent = countries.size;
+    document.getElementById('stat-active').textContent    = data.length;
+    document.getElementById('stat-hits').textContent      = data.reduce((s,d) => s + (d.hits||1), 0);
+
+    // Top country
+    const countMap = {};
+    data.forEach(d => { if (d.country) countMap[d.country] = (countMap[d.country]||0) + 1; });
+    const topCountry = Object.entries(countMap).sort((a,b) => b[1]-a[1])[0];
+    if (topCountry) document.getElementById('stat-top-country').textContent = topCountry[0];
+
+    // Place markers
+    data.forEach(d => {
+      if (!d.lat || !d.lon || (d.lat === 0 && d.lon === 0)) return;
+      const key = d.ip;
+      if (markers[key]) {
+        map.removeLayer(markers[key]);
+      }
+      const marker = L.marker([d.lat, d.lon], { icon: makeIcon(d.threat_level) })
+        .bindPopup(`
+          <div style="font-family:monospace;font-size:12px;min-width:200px">
+            <strong>${d.ip}</strong><br/>
+            📍 ${d.city || '?'}, ${d.country || '?'}<br/>
+            🌐 ${d.isp || '?'}<br/>
+            🔴 Score: ${d.threat_score || 0} (${d.threat_level || 'LOW'})<br/>
+            📡 Protocol: ${d.protocol || 'SSH'}<br/>
+            🔑 ${d.username || '?'} / ${d.password || '?'}
+          </div>`)
+        .addTo(map);
+      markers[key] = marker;
+    });
+
+    // Table
+    const tbody = document.getElementById('geo-table');
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:20px">No geo data yet — waiting for attacks...</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.slice(0,50).map(d => `
+      <tr>
+        <td><code>${d.ip}</code></td>
+        <td>${d.country_flag || ''} ${d.country || '?'}</td>
+        <td>${d.city || '?'}</td>
+        <td style="font-size:12px;color:#94a3b8">${d.isp || '?'}</td>
+        <td><span class="badge badge-info">${d.protocol || 'SSH'}</span></td>
+        <td><strong>${d.threat_score || 0}</strong></td>
+      </tr>`).join('');
+
+  } catch(e) {
+    console.error('Map load error:', e);
+  }
+}
+
+loadMap();
+setInterval(loadMap, 15000);
+</script>
+</body>
+</html>

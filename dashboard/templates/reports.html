@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>DecoyNetAI — Reports</title>
+<link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+<nav class="navbar">
+  <span class="logo">🛡 DecoyNetAI</span>
+  <a href="/">Dashboard</a>
+  <a href="/attacks">Attacks</a>
+  <a href="/clusters">Clusters</a>
+  <a href="/reports" class="active">Reports</a>
+  <a href="/api/docs">API</a>
+</nav>
+
+<main class="container">
+  <h2>Threat Intelligence Reports</h2>
+  <p class="subtitle">Automated daily reports — generated every 24 hours automatically.</p>
+
+  <section class="table-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3>Available Reports</h3>
+      <button onclick="generateNow()" style="
+        background:#3b82f6;color:#fff;border:none;padding:8px 16px;
+        border-radius:6px;cursor:pointer;font-size:13px;font-weight:500">
+        ⚡ Generate Now
+      </button>
+    </div>
+    <div id="report-list">
+      <p style="color:#94a3b8;padding:20px;text-align:center">Loading reports...</p>
+    </div>
+  </section>
+
+  <section class="table-box">
+    <h3>ML Evaluation Results</h3>
+    <div id="ml-results">
+      <p style="color:#94a3b8;padding:12px">
+        Run <code>python3 -m evaluation.ml_evaluation</code> to generate ML metrics.
+      </p>
+    </div>
+  </section>
+</main>
+
+<script>
+async function load() {
+  const res = await fetch('/api/reports');
+  const data = await res.json();
+
+  const div = document.getElementById('report-list');
+  if (!data.reports || !data.reports.length) {
+    div.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center">No reports yet — will generate automatically every 24 hours.</p>';
+    return;
+  }
+
+  div.innerHTML = `<table>
+    <thead><tr><th>Date</th><th>Sessions</th><th>Critical</th><th>Unique IPs</th><th>Actions</th></tr></thead>
+    <tbody>
+    ${data.reports.map(r => `
+      <tr>
+        <td>${r.date}</td>
+        <td>${r.total_sessions ?? '—'}</td>
+        <td><span class="badge badge-danger">${r.critical_sessions ?? '—'}</span></td>
+        <td>${r.unique_attackers ?? '—'}</td>
+        <td>
+          <a href="/reports/view/${r.filename}" target="_blank"
+             style="color:#3b82f6;text-decoration:none;font-size:12px">
+            📄 View HTML
+          </a>
+          &nbsp;|&nbsp;
+          <a href="/reports/download/${r.filename.replace('.html','.json')}"
+             style="color:#94a3b8;text-decoration:none;font-size:12px">
+            ⬇ JSON
+          </a>
+        </td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+
+  // Load ML evaluation if available
+  const mlRes = await fetch('/api/ml_evaluation');
+  if (mlRes.ok) {
+    const ml = await mlRes.json();
+    if (ml && ml.decision_tree) {
+      document.getElementById('ml-results').innerHTML = `
+        <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="stat-card">
+            <p class="stat-label">DTree Accuracy</p>
+            <p class="stat-value">${(ml.decision_tree.accuracy*100).toFixed(1)}%</p>
+          </div>
+          <div class="stat-card info">
+            <p class="stat-label">DTree F1-Score</p>
+            <p class="stat-value">${(ml.decision_tree.f1_score*100).toFixed(1)}%</p>
+          </div>
+          <div class="stat-card warn">
+            <p class="stat-label">K-Means Silhouette</p>
+            <p class="stat-value">${ml.kmeans?.silhouette_score ?? '—'}</p>
+          </div>
+          <div class="stat-card danger">
+            <p class="stat-label">Anomaly Detection</p>
+            <p class="stat-value">${ml.isolation_forest?.advanced_detection_rate ?? '—'}%</p>
+          </div>
+        </div>`;
+    }
+  }
+}
+
+async function generateNow() {
+  const btn = event.target;
+  btn.textContent = 'Generating...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/generate_report', {method:'POST'});
+    const data = await res.json();
+    if (data.success) {
+      btn.textContent = '✅ Done';
+      setTimeout(load, 500);
+    } else {
+      btn.textContent = '❌ Failed';
+    }
+  } catch(e) {
+    btn.textContent = '❌ Error';
+  }
+  setTimeout(() => { btn.textContent = '⚡ Generate Now'; btn.disabled = false; }, 3000);
+}
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>DecoyNetAI — Session Replay</title>
+<link rel="stylesheet" href="/static/style.css"/>
+<style>
+  .terminal {
+    background: #0a0a0a;
+    border: 1px solid #2a2d3a;
+    border-radius: 8px;
+    padding: 20px;
+    font-family: 'Fira Code', 'Courier New', monospace;
+    font-size: 13px;
+    color: #00ff41;
+    min-height: 400px;
+    max-height: 500px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+  .terminal .prompt { color: #00aaff; }
+  .terminal .output { color: #cccccc; }
+  .terminal .system { color: #888888; font-style: italic; }
+  .terminal .warn   { color: #f59e0b; }
+  .terminal .danger { color: #ef4444; }
+  .controls { display:flex; gap:12px; align-items:center; margin:16px 0; }
+  .btn { padding:8px 16px; border-radius:6px; border:none; cursor:pointer; font-size:13px; font-weight:500; }
+  .btn-primary { background:#3b82f6; color:#fff; }
+  .btn-success { background:#10b981; color:#fff; }
+  .btn-danger  { background:#ef4444; color:#fff; }
+  .btn:disabled { opacity:0.5; cursor:not-allowed; }
+  select { background:#1a1d27; border:1px solid #2a2d3a; color:#e2e8f0; padding:8px 12px; border-radius:6px; font-size:13px; }
+  .session-info { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+  .info-box { background:#1a1d27; border:1px solid #2a2d3a; border-radius:6px; padding:12px; }
+  .info-label { font-size:11px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px; }
+  .info-value { font-size:14px; font-weight:600; }
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <span class="logo">🛡 DecoyNetAI</span>
+  <a href="/">Dashboard</a>
+  <a href="/attacks">Attacks</a>
+  <a href="/clusters">Clusters</a>
+  <a href="/map">Attack Map</a>
+  <a href="/replay" class="active">Replay</a>
+  <a href="/reports">Reports</a>
+</nav>
+
+<main class="container">
+  <h2>Session Replay</h2>
+  <p class="subtitle">Replay any recorded attacker session command by command.</p>
+
+  <section class="table-box">
+    <div class="controls">
+      <select id="session-select" onchange="loadSession()">
+        <option value="">Select a session to replay...</option>
+      </select>
+      <button class="btn btn-success" id="btn-play" onclick="play()" disabled>▶ Play</button>
+      <button class="btn btn-primary" id="btn-step" onclick="stepForward()" disabled>⏭ Step</button>
+      <button class="btn btn-danger"  id="btn-stop" onclick="stop()" disabled>⏹ Stop</button>
+      <span id="progress" style="color:#94a3b8;font-size:13px"></span>
+    </div>
+
+    <div class="session-info" id="session-info" style="display:none">
+      <div class="info-box"><div class="info-label">Attacker IP</div><div class="info-value" id="info-ip">—</div></div>
+      <div class="info-box"><div class="info-label">Type</div><div class="info-value" id="info-type">—</div></div>
+      <div class="info-box"><div class="info-label">Threat Score</div><div class="info-value" id="info-score">—</div></div>
+      <div class="info-box"><div class="info-label">Strategy</div><div class="info-value" id="info-strategy">—</div></div>
+    </div>
+
+    <div class="terminal" id="terminal">
+      <span class="system">Select a session above to begin replay...</span>
+    </div>
+  </section>
+</main>
+
+<script>
+let sessionData  = null;
+let commandIndex = 0;
+let playTimer    = null;
+let allSessions  = [];
+
+async function init() {
+  const res      = await fetch('/api/sessions?limit=200');
+  allSessions    = await res.json();
+  const select   = document.getElementById('session-select');
+
+  allSessions.forEach(s => {
+    const opt   = document.createElement('option');
+    opt.value   = s.session_id;
+    opt.textContent = `${s.ip} | ${s.attacker_type || 'unknown'} | score:${s.threat_score} | ${s.protocol || 'SSH'} | ${s.start_time ? new Date(s.start_time*1000).toLocaleString() : '—'}`;
+    select.appendChild(opt);
+  });
+}
+
+async function loadSession() {
+  const sid = document.getElementById('session-select').value;
+  if (!sid) return;
+
+  stop();
+  commandIndex = 0;
+
+  const res  = await fetch(`/api/session_replay/${sid}`);
+  sessionData = await res.json();
+
+  const s = allSessions.find(x => x.session_id === sid) || {};
+
+  // Show session info
+  document.getElementById('session-info').style.display = 'grid';
+  document.getElementById('info-ip').textContent       = s.ip || '—';
+  document.getElementById('info-type').textContent     = s.attacker_type || '—';
+  document.getElementById('info-score').textContent    = s.threat_score || '—';
+  document.getElementById('info-strategy').textContent = s.final_strategy || '—';
+
+  // Clear terminal
+  const term = document.getElementById('terminal');
+  term.innerHTML = '';
+
+  appendLine('system', `=== Session Replay: ${sid.slice(0,8)}... ===`);
+  appendLine('system', `Attacker: ${s.ip} | Type: ${s.attacker_type} | Score: ${s.threat_score}`);
+  appendLine('system', `Attack Chain: ${s.attack_chain || '—'}`);
+  appendLine('system', '');
+  appendLine('output',
+    'Welcome to Ubuntu 20.04.6 LTS (GNU/Linux 5.15.0-76-generic x86_64)\r\n');
+
+  document.getElementById('btn-play').disabled = false;
+  document.getElementById('btn-step').disabled = false;
+  updateProgress();
+}
+
+function play() {
+  if (!sessionData?.commands?.length) return;
+  document.getElementById('btn-play').disabled = true;
+  document.getElementById('btn-stop').disabled = false;
+  playNext();
+}
+
+function playNext() {
+  if (commandIndex >= sessionData.commands.length) {
+    finish();
+    return;
+  }
+  stepForward();
+  const delay = Math.min(sessionData.commands[commandIndex - 1]?.delay || 1000, 3000);
+  playTimer = setTimeout(playNext, delay);
+}
+
+function stepForward() {
+  if (!sessionData?.commands?.length) return;
+  if (commandIndex >= sessionData.commands.length) {
+    finish();
+    return;
+  }
+  const cmd = sessionData.commands[commandIndex];
+  commandIndex++;
+
+  appendLine('prompt', `root@DecoyNet:~# `);
+  appendLine('output', cmd.command || '');
+  if (cmd.output) {
+    appendLine('output', cmd.output);
+  }
+  if (cmd.strategy) {
+    appendLine('system', `  [Strategy: ${cmd.strategy}]`);
+  }
+  updateProgress();
+}
+
+function stop() {
+  if (playTimer) {
+    clearTimeout(playTimer);
+    playTimer = null;
+  }
+  document.getElementById('btn-play').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+}
+
+function finish() {
+  stop();
+  appendLine('system', '');
+  appendLine('system', '=== Session ended ===');
+  document.getElementById('btn-play').disabled = true;
+  document.getElementById('btn-step').disabled = true;
+}
+
+function appendLine(cls, text) {
+  const term = document.getElementById('terminal');
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = text + '\n';
+  term.appendChild(span);
+  term.scrollTop = term.scrollHeight;
+}
+
+function updateProgress() {
+  const total = sessionData?.commands?.length || 0;
+  document.getElementById('progress').textContent =
+    total ? `Command ${commandIndex} / ${total}` : '';
+}
+
+init();
+</script>
+</body>
+</html>

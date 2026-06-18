@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>DecoyNetAI — Clusters</title>
+<link rel="stylesheet" href="/static/style.css"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<nav class="navbar">
+  <span class="logo">🛡 DecoyNetAI</span>
+  <a href="/">Dashboard</a>
+  <a href="/attacks">Attacks</a>
+  <a href="/clusters" class="active">Clusters</a>
+  <a href="/reports">Reports</a>
+  <a href="/api/docs">API</a>
+</nav>
+
+<main class="container">
+  <h2>ML Attack Analysis</h2>
+  <p class="subtitle">Machine learning clustering and anomaly detection results from all sessions.</p>
+
+  <section class="stat-grid">
+    <div class="stat-card"><p class="stat-label">Total Sessions</p><p class="stat-value" id="total">0</p></div>
+    <div class="stat-card danger"><p class="stat-label">Anomalies</p><p class="stat-value" id="anomalies">0</p></div>
+    <div class="stat-card info"><p class="stat-label">Bot Sessions</p><p class="stat-value" id="bots">0</p></div>
+    <div class="stat-card warn"><p class="stat-label">Human Sessions</p><p class="stat-value" id="humans">0</p></div>
+  </section>
+
+  <section class="chart-grid">
+    <div class="chart-box">
+      <h3>Sessions per Cluster (K-Means)</h3>
+      <canvas id="clusterChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Attacker Type Distribution</h3>
+      <canvas id="typeChart"></canvas>
+    </div>
+  </section>
+
+  <section class="chart-grid">
+    <div class="chart-box">
+      <h3>Protocol Distribution</h3>
+      <canvas id="protoChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Threat Level Distribution</h3>
+      <canvas id="levelChart"></canvas>
+    </div>
+  </section>
+
+  <section class="table-box">
+    <h3>High Threat Sessions — Anomalies & Critical</h3>
+    <table>
+      <thead>
+        <tr><th>IP</th><th>Protocol</th><th>Type</th><th>Score</th><th>Level</th><th>Strategy</th><th>Chain</th></tr>
+      </thead>
+      <tbody id="anomaly-body">
+        <tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px">Loading...</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+async function load() {
+  const [sessRes, typeRes] = await Promise.all([
+    fetch('/api/sessions?limit=1000'),
+    fetch('/api/attacker_types'),
+  ]);
+  const sessions = await sessRes.json();
+  const types    = await typeRes.json();
+
+  // Stats
+  document.getElementById('total').textContent     = sessions.length;
+  document.getElementById('anomalies').textContent = sessions.filter(s => s.threat_level === 'CRITICAL').length;
+  document.getElementById('bots').textContent      = sessions.filter(s => s.attacker_type === 'bot').length;
+  document.getElementById('humans').textContent    = sessions.filter(s => s.attacker_type === 'human').length;
+
+  // Cluster chart — group by threat level as proxy for cluster
+  const clusterMap = {};
+  sessions.forEach(s => {
+    const k = s.threat_level || 'LOW';
+    clusterMap[k] = (clusterMap[k] || 0) + 1;
+  });
+  new Chart(document.getElementById('clusterChart'), {
+    type: 'bar',
+    data: {
+      labels: Object.keys(clusterMap),
+      datasets: [{ label: 'Sessions', data: Object.values(clusterMap),
+        backgroundColor: ['#10b981','#f59e0b','#f97316','#ef4444'] }]
+    },
+    options: { plugins: { legend: { display: false } }, responsive: true,
+      scales: { x: { ticks:{color:'#94a3b8'}, grid:{color:'#2a2d3a'} },
+                y: { ticks:{color:'#94a3b8'}, grid:{color:'#2a2d3a'} } } }
+  });
+
+  // Type donut
+  new Chart(document.getElementById('typeChart'), {
+    type: 'doughnut',
+    data: {
+      labels: types.map(t => t.attacker_type || 'unknown'),
+      datasets: [{ data: types.map(t => t.count),
+        backgroundColor: ['#3b82f6','#10b981','#ef4444','#6b7280'] }]
+    },
+    options: { plugins: { legend: { labels: { color: '#e2e8f0' } } }, responsive: true }
+  });
+
+  // Protocol distribution
+  const protoMap = {};
+  sessions.forEach(s => {
+    const p = s.protocol || 'SSH';
+    protoMap[p] = (protoMap[p] || 0) + 1;
+  });
+  new Chart(document.getElementById('protoChart'), {
+    type: 'bar',
+    data: {
+      labels: Object.keys(protoMap),
+      datasets: [{ label: 'Sessions', data: Object.values(protoMap),
+        backgroundColor: '#3b82f6' }]
+    },
+    options: { plugins: { legend: { display: false } }, responsive: true,
+      scales: { x: { ticks:{color:'#94a3b8'}, grid:{color:'#2a2d3a'} },
+                y: { ticks:{color:'#94a3b8'}, grid:{color:'#2a2d3a'} } } }
+  });
+
+  // Threat level bar
+  const levelMap = {LOW:0,MEDIUM:0,HIGH:0,CRITICAL:0};
+  sessions.forEach(s => { if (s.threat_level in levelMap) levelMap[s.threat_level]++; });
+  new Chart(document.getElementById('levelChart'), {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(levelMap),
+      datasets: [{ data: Object.values(levelMap),
+        backgroundColor: ['#10b981','#f59e0b','#f97316','#ef4444'] }]
+    },
+    options: { plugins: { legend: { labels: { color: '#e2e8f0' } } }, responsive: true }
+  });
+
+  // Anomaly table
+  const high = sessions.filter(s => ['HIGH','CRITICAL'].includes(s.threat_level))
+                        .sort((a,b) => (b.threat_score||0)-(a.threat_score||0))
+                        .slice(0, 50);
+  const tbody = document.getElementById('anomaly-body');
+  if (!high.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px">No high threat sessions yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = high.map(s => `
+    <tr>
+      <td><code>${s.ip}</code></td>
+      <td><span class="badge badge-info">${s.protocol||'SSH'}</span></td>
+      <td><span class="badge badge-${typeBadge(s.attacker_type)}">${s.attacker_type||'unknown'}</span></td>
+      <td><strong>${s.threat_score}</strong></td>
+      <td><span class="badge badge-${levelBadge(s.threat_level)}">${s.threat_level}</span></td>
+      <td>${s.final_strategy||'—'}</td>
+      <td style="font-size:11px;color:#94a3b8">${s.attack_chain||'—'}</td>
+    </tr>`).join('');
+}
+
+function levelBadge(l) {
+  return {LOW:'green',MEDIUM:'warn',HIGH:'orange',CRITICAL:'danger'}[l]||'info';
+}
+function typeBadge(t) {
+  return {bot:'info',human:'green',advanced:'danger',unknown:'warn'}[t]||'warn';
+}
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
